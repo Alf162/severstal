@@ -3,6 +3,8 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+import pandas as pd
+import cv2
 from albumentations import (
     PadIfNeeded,
     HorizontalFlip,
@@ -26,6 +28,21 @@ from albumentations import (
 path = 'data/'
 
 
+def prepare_data():
+    tr = pd.read_csv(path + '/train/train.csv')
+    df_train = tr[tr['EncodedPixels'].notnull()].reset_index(drop=True)
+    df_aug = make_aug(df_train)
+    df_train.append(df_aug, ignore_index=True)
+    data_transf = transforms.Compose([
+        transforms.Scale((256, 256)),
+        transforms.ToTensor()])
+    train_data = ImageData(df=df_train, transform=data_transf)
+    train_loader = DataLoader(dataset=train_data, batch_size=4)
+    submit = pd.read_csv(path + 'sample_submission.csv', converters={'EncodedPixels': lambda e: ' '})
+    test_data = ImageData(df=submit, transform=data_transf, subset="test")
+    test_loader = DataLoader(dataset=test_data, shuffle=False)
+    return train_loader, test_loader
+
 
 def rle2mask(rle, imgshape):
     width = imgshape[0]
@@ -43,6 +60,22 @@ def rle2mask(rle, imgshape):
         current_position += lengths[index]
 
     return np.flipud(np.rot90(mask.reshape(height, width), k=1))
+
+
+def make_aug(df_train):
+    df_aug = pd.DataFrame(columns=['ImageId_ClassId', 'EncodedPixels'])
+    for index, row in df_train.iterrows():
+        img = cv2.imread((path + "train/" + row['ImageId_ClassId']).split('_')[0])
+        fname = (path + "train/" + row['ImageId_ClassId']).split('_')[0]
+        mask = rle2mask(row['EncodedPixels'], (256, 1600))
+        aug = load_aug(img)
+        augmented = aug(image=img, mask=mask)
+        image_aug = augmented['image']
+        mask_aug = augmented['mask']
+        fname_aug = fname + '_5'
+        cv2.imwrite(fname_aug, image_aug)
+        df_aug.loc[index] = [fname_aug, mask2rle(mask_aug)]
+    return df_aug
 
 
 def mask2rle(img):

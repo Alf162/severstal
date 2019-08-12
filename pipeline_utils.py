@@ -23,28 +23,27 @@ from unet import UNet
 path = 'data/'
 
 
-def train_model():
-    model = UNet(n_class=1).cuda()
-    criterion = nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.SGD(model.parameters(), weight_decay=1e-4, lr=0.001, momentum=0.9)
-    train_loader, test_loader = prepare_data()
-    for epoch in range(5):
-        model.train()
-        for ii, (data, target) in enumerate(train_loader):
-            data, target = data.cuda(), target.cuda()
-            optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer.step()
-        print('Epoch: {} - Loss: {:.6f}'.format(epoch + 1, loss.item()))
-    torch.save(model.state_dict(), 'my_model.pth')
-    return model, test_loader
+def load_model(path_):
+    model = torch.load(path_)
+    return model
 
 
-def make_predict(model):
+def prepare_data(**kwargs):
+    data_transf = transforms.Compose([
+        transforms.Scale((256, 256)),
+        transforms.ToTensor()])
+    submit = pd.read_csv(path + 'sample_submission.csv', converters={'EncodedPixels': lambda e: ' '})
+    test_data = ImageData(df=submit, transform=data_transf, subset="test")
+    test_loader = DataLoader(dataset=test_data, shuffle=False)
+    kwargs['model_vals'].xcom_push(key='test_loader', value=test_loader)
+
+
+def predict(**kwargs):
+    model_vals = kwargs['model_vals']
+    model = load_model('model.pth')
     model.eval()
     predict = []
+    test_loader = model_vals.xcom_pull(key='test_loader', task_ids='prepare_data')
     for data in test_loader:
         data = data.cuda()
         output = model(data)
@@ -55,12 +54,12 @@ def make_predict(model):
         img[img > mn] = 1
         img = cv2.resize(img[0], (1600, 256))
         predict.append(mask2rle(img))
-    return predict
+    kwargs['model_vals'].xcom_push(key='predict_arr', value=predict)
 
 
-if __name__ == '__main__':
+def postprocess(**kwargs):
+    model_vals = kwargs['model_vals']
+    predict = model_vals.xcom_pull(key='predict_arr', task_ids='predict')
     submit = pd.read_csv(path + 'sample_submission.csv', converters={'EncodedPixels': lambda e: ' '})
-    model, test_loader = train_model()
-    predict = make_predict(model)
-    submit['EncodedPixels'][submit['ImageId_ClassId'].apply(lambda x: x.split('_')[1] == '4')] = predict
+    submit['EncodedPixels'] = predict
     submit.to_csv('submission.csv', index=False)

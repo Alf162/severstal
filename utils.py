@@ -3,9 +3,28 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from albumentations import (
+    PadIfNeeded,
+    HorizontalFlip,
+    VerticalFlip,
+    CenterCrop,
+    Crop,
+    Compose,
+    Transpose,
+    RandomRotate90,
+    ElasticTransform,
+    GridDistortion,
+    OpticalDistortion,
+    RandomSizedCrop,
+    OneOf,
+    CLAHE,
+    RandomBrightnessContrast,
+    RandomGamma
+)
 
 
 path = 'data/'
+
 
 
 def rle2mask(rle, imgshape):
@@ -43,6 +62,24 @@ def mask2rle(img):
             lastColor = 0
             rle.append( str(startpos)+' '+str(endpos-startpos+1) )
     return " ".join(rle)
+
+
+def load_aug(img):
+    original_height, original_width = img.shape[:2]
+    aug = Compose([
+        OneOf([RandomSizedCrop(min_max_height=(50, 101), height=original_height, width=original_width, p=0.5),
+               PadIfNeeded(min_height=original_height, min_width=original_width, p=0.5)], p=1),
+        VerticalFlip(p=0.5),
+        RandomRotate90(p=0.5),
+        OneOf([
+            ElasticTransform(p=0.5, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+            GridDistortion(p=0.5),
+            OpticalDistortion(p=1, distort_limit=2, shift_limit=0.5)
+        ], p=0.8),
+        CLAHE(p=0.8),
+        RandomBrightnessContrast(p=0.8),
+        RandomGamma(p=0.8)])
+    return aug
 
 
 class ImageData(Dataset):
